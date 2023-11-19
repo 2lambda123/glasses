@@ -28,7 +28,7 @@ class InvertedResidualBlock(nn.Module):
         stride (int, optional): Stide used in the depth convolution. Defaults to 1.
         expansion (int, optional): The expansion ratio applied. Defaults to 6.
         activation (nn.Module, optional): The activation funtion used. Defaults to nn.SiLU.
-        drop_rate (float, optional): If > 0, add a  nn.Dropout2d at the end of the block. Defaults to 0.2.
+        drop_rate (float, optional): If > 0, add a  StochasticDepth at the end of the block. Defaults to 0.2.
         se (bool, optional): If True, add a ChannelSE module after the depth convolution. Defaults to True.
         kernel_size (int, optional): [description]. Defaults to 3.
     """
