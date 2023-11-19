@@ -2,16 +2,14 @@ from __future__ import annotations
 import torch
 from torch import nn
 from torch import Tensor
-from ..resnet import ResNetEncoder, ResNetHead, ResNet, ResNetStem
+from ..resnet import ResNetEncoder, ResNetHead, ResNetStem
 from collections import OrderedDict
 from typing import List
-from functools import partial
 from ..resnet import ReLUInPlace
-from glasses.nn.blocks.residuals import ResidualCat2d
 from glasses.nn.blocks import Conv2dPad
-from ....models.base import VisionModule
+from ..base import ClassificationModule
 
-from glasses.utils.PretrainedWeightsProvider import Config, pretrained
+from glasses.utils.PretrainedWeightsProvider import pretrained
 
 
 class DenseNetBasicBlock(nn.Module):
@@ -27,13 +25,26 @@ class DenseNetBasicBlock(nn.Module):
         activation (nn.Module, optional): [description]. Defaults to ReLUInPlace.
     """
 
-    def __init__(self, in_features: int, out_features: int,  activation: nn.Module = ReLUInPlace, *args, **kwargs):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        activation: nn.Module = ReLUInPlace,
+        *args,
+        **kwargs
+    ):
         super().__init__()
-        self.block = nn.Sequential(OrderedDict({
-            'bn': nn.BatchNorm2d(in_features),
-            'act': activation(),
-            'conv': Conv2dPad(in_features, out_features, kernel_size=3, *args, **kwargs)
-        }))
+        self.block = nn.Sequential(
+            OrderedDict(
+                {
+                    "bn": nn.BatchNorm2d(in_features),
+                    "act": activation(),
+                    "conv": Conv2dPad(
+                        in_features, out_features, kernel_size=3, *args, **kwargs
+                    ),
+                }
+            )
+        )
 
     def forward(self, x: Tensor) -> Tensor:
         res = x
@@ -57,22 +68,45 @@ class DenseBottleNeckBlock(DenseNetBasicBlock):
 
     """
 
-    def __init__(self, in_features: int, out_features: int,  activation: nn.Module = ReLUInPlace, expansion: int = 4, *args, **kwargs):
-        super().__init__(in_features, out_features,  activation, *args, **kwargs)
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        activation: nn.Module = ReLUInPlace,
+        expansion: int = 4,
+        **kwargs
+    ):
+        super().__init__(in_features, out_features, activation, **kwargs)
         self.expansion = expansion
         self.expanded_features = out_features * self.expansion
 
-        self.block = nn.Sequential(OrderedDict({
-            'bn1': nn.BatchNorm2d(in_features),
-            'act1': activation(),
-            'conv1': Conv2dPad(in_features, self.expanded_features, kernel_size=1, bias=False, *args, **kwargs),
-            'bn2': nn.BatchNorm2d(self.expanded_features),
-            'act2': activation(),
-            'conv2': Conv2dPad(self.expanded_features, out_features, kernel_size=3, bias=False, *args, **kwargs)
-        }))
+        self.block = nn.Sequential(
+            OrderedDict(
+                {
+                    "bn1": nn.BatchNorm2d(in_features),
+                    "act1": activation(),
+                    "conv1": Conv2dPad(
+                        in_features,
+                        self.expanded_features,
+                        kernel_size=1,
+                        bias=False,
+                        **kwargs
+                    ),
+                    "bn2": nn.BatchNorm2d(self.expanded_features),
+                    "act2": activation(),
+                    "conv2": Conv2dPad(
+                        self.expanded_features,
+                        out_features,
+                        kernel_size=3,
+                        bias=False,
+                        **kwargs
+                    ),
+                }
+            )
+        )
 
 
-class TransitionBlock(nn.Module):
+class TransitionBlock(nn.Sequential):
     """A transition block is used to downsample the output using 1x1 conv followed by 2x2 average pooling.
 
     .. image:: https://github.com/FrancescoSaverioZuppichini/glasses/blob/develop/docs/_static/images/DenseNetTransitionBlock.png?raw=true
@@ -84,25 +118,24 @@ class TransitionBlock(nn.Module):
         activation (nn.Module, optional): [description]. Defaults to ReLUInPlace.
     """
 
-    def __init__(self, in_features: int, factor: int = 2, activation: nn.Module = ReLUInPlace):
-        super().__init__()
-        self.block = nn.Sequential(
+    def __init__(
+        self, in_features: int, factor: int = 2, activation: nn.Module = ReLUInPlace
+    ):
+        super().__init__(
             OrderedDict(
                 {
-                    'bn': nn.BatchNorm2d(in_features),
-                    'act': activation(),
-                    'conv': Conv2dPad(in_features, in_features // factor,
-                                      kernel_size=1, bias=False),
-                    'pool': nn.AvgPool2d(kernel_size=2, stride=2)
+                    "bn": nn.BatchNorm2d(in_features),
+                    "act": activation(),
+                    "conv": Conv2dPad(
+                        in_features, in_features // factor, kernel_size=1, bias=False
+                    ),
+                    "pool": nn.AvgPool2d(kernel_size=2, stride=2),
                 }
-            ))
-
-    def forward(self, x: Tensor) -> Tensor:
-        x = self.block(x)
-        return x
+            )
+        )
 
 
-class DenseNetLayer(nn.Module):
+class DenseNetLayer(nn.Sequential):
     """A DenseNet layer is composed by `n` `blocks` stacked together followed by a transition to downsample the output features.
 
     .. image:: https://github.com/FrancescoSaverioZuppichini/glasses/blob/develop/docs/_static/images/DenseNetLayer.png?raw=true
@@ -115,22 +148,28 @@ class DenseNetLayer(nn.Module):
         transition_block (nn.Module, optional): A module applied after the block(s). Defaults to TransitionBlock.
     """
 
-    def __init__(self, in_features: int, grow_rate: int = 32, n: int = 4,
-                 block: nn.Module = DenseBottleNeckBlock, transition_block: nn.Module = TransitionBlock, *args, **kwargs):
-        super().__init__()
+    def __init__(
+        self,
+        in_features: int,
+        grow_rate: int = 32,
+        n: int = 4,
+        block: nn.Module = DenseBottleNeckBlock,
+        transition_block: nn.Module = TransitionBlock,
+        *args,
+        **kwargs
+    ):
         self.out_features = grow_rate * n + in_features
-        self.block = nn.Sequential(
+        super().__init__(
             # in each block, the number of features is equal to the input size + the outputs of all the previos layers (grow_rate * i)
-            *[block(grow_rate * i + in_features, grow_rate, *args, **kwargs)
-              for i in range(n)],
+            *[
+                block(grow_rate * i + in_features, grow_rate, *args, **kwargs)
+                for i in range(n)
+            ],
             # reduce the output features by a factor of 2
-            transition_block(self.out_features, *args, **
-                             kwargs) if transition_block else nn.Identity()
+            transition_block(self.out_features, *args, **kwargs)
+            if transition_block
+            else nn.Identity()
         )
-
-    def forward(self, x: Tensor) -> Tensor:
-        x = self.block(x)
-        return x
 
 
 class DenseNetEncoder(ResNetEncoder):
@@ -145,9 +184,17 @@ class DenseNetEncoder(ResNetEncoder):
         block (nn.Module, optional): [description]. Defaults to DenseNetBasicBlock.
     """
 
-    def __init__(self, in_channels: int = 3, start_features: int = 64,  grow_rate: int = 32,
-                 depths: List[int] = [4, 4, 4, 4],
-                 activation: nn.Module = ReLUInPlace, block: nn.Module = DenseBottleNeckBlock, *args, **kwargs):
+    def __init__(
+        self,
+        in_channels: int = 3,
+        start_features: int = 64,
+        grow_rate: int = 32,
+        depths: List[int] = [4, 4, 4, 4],
+        activation: nn.Module = ReLUInPlace,
+        block: nn.Module = DenseBottleNeckBlock,
+        *args,
+        **kwargs
+    ):
         super().__init__(in_channels)
         self.layers = nn.ModuleList([])
         self.widths = [start_features]
@@ -156,8 +203,11 @@ class DenseNetEncoder(ResNetEncoder):
         in_features = start_features
 
         for deepth in depths[:-1]:
-            self.layers.append(DenseNetLayer(
-                in_features, grow_rate, deepth, block=block, *args, **kwargs))
+            self.layers.append(
+                DenseNetLayer(
+                    in_features, grow_rate, deepth, block=block, *args, **kwargs
+                )
+            )
             # in each layer the in_features are equal the features we have so far + the number of layer multiplied by the grow rate
             in_features += deepth * grow_rate
             in_features //= 2
@@ -165,15 +215,22 @@ class DenseNetEncoder(ResNetEncoder):
 
         self.widths.append(in_features + depths[-1] * grow_rate)
 
-        self.layers.append(DenseNetLayer(
-            in_features, grow_rate, depths[-1], block=block, *args,
-            transition_block=lambda x: nn.Sequential(
-                nn.BatchNorm2d(self.widths[-1]),
-                activation()
-            ), **kwargs))
+        self.layers.append(
+            DenseNetLayer(
+                in_features,
+                grow_rate,
+                depths[-1],
+                block=block,
+                *args,
+                transition_block=lambda x: nn.Sequential(
+                    nn.BatchNorm2d(self.widths[-1]), activation()
+                ),
+                **kwargs
+            )
+        )
 
 
-class DenseNet(VisionModule):
+class DenseNet(ClassificationModule):
     """Implementation of DenseNet proposed in `Densely Connected Convolutional Networks <https://arxiv.org/abs/1608.06993>`_
 
     Create a default models
@@ -212,12 +269,15 @@ class DenseNet(VisionModule):
         n_classes (int, optional): Number of classes. Defaults to 1000.
     """
 
-    def __init__(self, in_channels: int = 3,  n_classes: int = 1000, *args, **kwargs):
-        super().__init__()
-        self.encoder = DenseNetEncoder(in_channels, *args, **kwargs)
-        self.head = ResNetHead(
-            self.encoder.widths[-1], n_classes)
-            
+    def __init__(
+        self,
+        encoder: nn.Module = DenseNetEncoder,
+        head: nn.Module = ResNetHead,
+        *args,
+        **kwargs
+    ):
+        super().__init__(encoder, head, *args, **kwargs)
+
     def forward(self, x: Tensor) -> Tensor:
         x = self.encoder(x)
         x = self.head(x)
@@ -245,7 +305,9 @@ class DenseNet(VisionModule):
         Returns:
             DenseNet: A densenet161 model
         """
-        return DenseNet(*args, start_features=96, grow_rate=48, depths=[6, 12, 36, 24], **kwargs)
+        return DenseNet(
+            *args, start_features=96, grow_rate=48, depths=[6, 12, 36, 24], **kwargs
+        )
 
     @classmethod
     @pretrained()
@@ -264,9 +326,9 @@ class DenseNet(VisionModule):
     def densenet201(cls, *args, **kwargs) -> DenseNet:
         """Creates a densenet201 model. *Grow rate* is set to 32
 
-         .. image:: https://github.com/FrancescoSaverioZuppichini/glasses/blob/develop/docs/_static/images/DenseNet201.png?raw=true
+        .. image:: https://github.com/FrancescoSaverioZuppichini/glasses/blob/develop/docs/_static/images/DenseNet201.png?raw=true
 
-         Returns:
-             DenseNet: A densenet201 model
-         """
+        Returns:
+            DenseNet: A densenet201 model
+        """
         return DenseNet(*args, grow_rate=32, depths=[6, 12, 48, 32], **kwargs)

@@ -1,12 +1,9 @@
-import cv2
 import matplotlib.pyplot as plt
-import numpy as np
 import torch
-from glasses.utils.Storage import BackwardModuleStorage, ForwardModuleStorage
+from glasses.utils.Storage import BackwardModuleStorage
 from torch import nn
 from torch.autograd import Variable
 from torch.nn import ReLU
-from torchvision.transforms import *
 
 from .Interpretability import Interpretability
 from .utils import convert_to_grayscale, find_first_layer
@@ -16,12 +13,13 @@ class SaliencyMapResult:
     def __init__(self, saliency_map: torch.Tensor):
         self.saliency_map = saliency_map
 
-    def show(self) -> plt.figure:
+    def show(self, *args, **kwargs) -> plt.figure:
 
-        fig = plt.figure()
+        fig = plt.figure(*args, **kwargs)
         plt.imshow(self.saliency_map.squeeze())
 
         return fig
+
 
 class SaliencyMap(Interpretability):
     """Implementation of `Deep Inside Convolutional Networks: Visualising Image Classification Models
@@ -36,7 +34,15 @@ class SaliencyMap(Interpretability):
             if isinstance(module, ReLU):
                 module.register_backward_hook(guide_relu)
 
-    def __call__(self, x: torch.Tensor, module: nn.Module, layer: nn.Module = None, ctx: torch.Tensor = None, target: int = None, guide: bool = True) -> SaliencyMapResult:
+    def __call__(
+        self,
+        x: torch.Tensor,
+        module: nn.Module,
+        layer: nn.Module = None,
+        ctx: torch.Tensor = None,
+        target: int = None,
+        guide: bool = True,
+    ) -> SaliencyMapResult:
         """Run SaliencyMap on the input given a model
 
         Args:
@@ -49,8 +55,7 @@ class SaliencyMap(Interpretability):
         Returns:
             SaliencyMapResult: The result of the saliency map, you can call `.show` to see it.
         """
-        layer = find_first_layer(
-            x, module, nn.Conv2d) if layer is None else layer
+        layer = find_first_layer(x, module, nn.Conv2d) if layer is None else layer
         gradients_storage = BackwardModuleStorage([layer])
         if guide:
             self.guide(module)

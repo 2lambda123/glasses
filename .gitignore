@@ -9,7 +9,7 @@ temp.py
 __pycache__/
 *.py[cod]
 *$py.class
-
+temp.py
 # C extensions
 *.so
 
@@ -136,3 +136,4 @@ dmypy.json
 .pyre/
 
 table-torchvision.md
+*.pyc
