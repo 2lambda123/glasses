@@ -2,7 +2,7 @@ pytest==5.4.3
 tqdm==4.46.0
 torchvision
 torch
-requests==2.23.0
+requests==2.31.0
 torchinfo
 opencv-python
 matplotlib
